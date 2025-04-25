@@ -1,71 +1,49 @@
-import os
-import cv2
 import torch
-import numpy as np
+from pytorchvideo.transforms import UniformTemporalSubsample
 from torch.utils.data import Dataset
-from torchvision import transforms
-from typing import List, Optional
+from pytorchvideo.data.encoded_video import EncodedVideo
+from typing import Callable, Dict
 
 
-class DAREDataset(Dataset):
+class DeceptionDataset(Dataset):
     def __init__(
         self,
-        video_dir: str,
-        annotation_file: str,
+        video_label_map: Dict[str, int],
+        transform: Callable = None,
         num_frames: int = 16,
-        transform: Optional[transforms.Compose] = None,
-        frame_size: int = 224,
-        preload: bool = False
     ):
-        self.video_dir = video_dir
-        self.annotation_file = annotation_file
+        self.video_label_map = video_label_map
+        self.video_paths = list(video_label_map.keys())
+        self.transform = transform
         self.num_frames = num_frames
-        self.frame_size = frame_size
-        self.transform = transform or transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize((frame_size, frame_size)),
-            transforms.ToTensor()
-        ])
-        self.samples = self._load_annotations()
-        self.preload = preload
-        if preload:
-            self.preloaded_data = [self._load_video(path) for path, _ in self.samples]
-
-    def _load_annotations(self) -> List:
-        with open(self.annotation_file, 'r') as f:
-            lines = f.readlines()
-        samples = []
-        for line in lines:
-            name, label = line.strip().split()
-            video_path = os.path.join(self.video_dir, f"{name}.avi")
-            samples.append((video_path, int(label)))
-        return samples
-
-    def _load_video(self, video_path: str) -> torch.Tensor:
-        cap = cv2.VideoCapture(video_path)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        frame_indices = np.linspace(0, total_frames - 1, self.num_frames).astype(int)
-        frames = []
-        for idx in range(total_frames):
-            ret, frame = cap.read()
-            if idx in frame_indices and ret:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frames.append(self.transform(frame))
-        cap.release()
-        if len(frames) < self.num_frames:
-            # Pad with last frame
-            last_frame = frames[-1] if frames else torch.zeros(3, self.frame_size, self.frame_size)
-            while len(frames) < self.num_frames:
-                frames.append(last_frame)
-        return torch.stack(frames)
+        self.num_videos = len(video_label_map)
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.video_paths)
 
-    def __getitem__(self, idx):
-        if self.preload:
-            video = self.preloaded_data[idx]
-        else:
-            video = self._load_video(self.samples[idx][0])
-        label = self.samples[idx][1]
-        return video, label
+    def __getitem__(self, index):
+        video_path = self.video_paths[index]
+        label = self.video_label_map[video_path]
+
+        video = EncodedVideo.from_path(video_path)
+        video_data = video.get_clip(0, video.duration)
+        video_tensor = video_data['video']  # shape: (C, T, H, W)
+
+        if video_tensor is None:
+            raise ValueError(f"Could not load video: {video_path}")
+
+        C, T, H, W = video_tensor.shape
+        if T < self.num_frames:
+            pad = video_tensor[:, -1:].repeat(1, self.num_frames - T, 1, 1)
+            video_tensor = torch.cat([video_tensor, pad], dim=1)
+
+        # Subsample T frames uniformly
+        video_clip = UniformTemporalSubsample(self.num_frames)(video_tensor)  # still (C, T, H, W)
+
+        if self.transform:
+            video_clip = self.transform({"video": video_clip})["video"]
+
+        return {
+            "video": video_clip,  # torch.Tensor of shape (C, T, H, W)
+            "label": label        # 0 (truth) or 1 (lie)
+        }
