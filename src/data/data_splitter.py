@@ -8,7 +8,6 @@ from src.utils import constants
 
 
 def extract_clip_info(filename: str) -> Tuple[str, str]:
-    # Parses 'trial_lie_001_000.mp4' → ('lie', '001')
     parts = filename.split('_')
     label = parts[1]
     scene_id = parts[2]
