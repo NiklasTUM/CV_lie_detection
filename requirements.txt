@@ -11,3 +11,5 @@ imageio
 ipython
 evaluate
 decord
+face-recognition
+moviepy
