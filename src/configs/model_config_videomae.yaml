@@ -1,9 +1,0 @@
-model_type: videomae
-pretrained: mcg-nju/videomae-base
-num_classes: 2
-num_frames: 16
-frame_size: 224
-batch_size: 4
-video_dir: data/Video_chunks
-annotation_file: path/to/video_list.txt
-preload: false

@@ -10,3 +10,4 @@ pytorchvideo
 imageio
 ipython
 evaluate
+decord
